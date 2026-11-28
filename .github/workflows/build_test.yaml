@@ -5,154 +5,182 @@ on:
   push:
     branches:
       - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
-    - uses: actions/checkout@v4
-    - name: install python
-      run: sudo apt install python3 python3-pip python3-venv
-    - name: install python-deps one
-      run: cd python && python3 setup.py egg_info && pip3 install `grep -v '^\[' src/*.egg-info/requires.txt`
-    - name: install deps
-      run: python3 ./scripts/dev.py utils install-system-packages --clangformat
+    - uses: actions/checkout@v7
+    - name: setup venv
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3 python3-pip python3-venv
+        python3 -m venv venv
+        echo "${GITHUB_WORKSPACE}/venv/bin" >> "$GITHUB_PATH"
+        echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/venv" >> "$GITHUB_ENV"
+    - name: install dev.py deps
+      run: pip install -r scripts/requirements.txt setuptools
+    - name: install system deps
+      run: sudo -E "$VIRTUAL_ENV/bin/python" ./scripts/dev.py utils install-system-packages --clangformat
     - name: install python-deps
-      run: pip3 install --force-reinstall mypy==1.14.1 flake8==7.1.2 clang-format==14.0.0
+      run: |
+        cd python && python setup.py egg_info && pip install `grep -v '^\[' src/*.egg-info/requires.txt`
+        pip install --force-reinstall mypy==1.14.1 flake8==7.1.2 clang-format==14.0.0
     - name: cpp-lint
-      run: python3 ./scripts/dev.py lint clang-format
+      run: python ./scripts/dev.py lint clang-format
     - name: python-lint
       run: cd python && mypy ./src ./tests ../tests/hil ../tests/integration && flake8
       continue-on-error: true
-  linux-2204-build:
-    runs-on: ubuntu-22.04
+
+  linux-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, ubuntu-22.04-arm, ubuntu-24.04-arm, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v4
-    - name: install python
-      run: sudo apt install python3 python3-pip python3-venv
-    - name: install deps
-      run: python3 ./scripts/dev.py utils install-system-packages
-    - name: cmake configure
-      run: cmake . -B build -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON
-    - name: cmake build
-      run: cmake --build build -j4
-    - name: run tests
-      run: cd build/ && ctest -j4 --output-on-failure
-  linux-2404-build:
-    runs-on: ubuntu-24.04
-    steps:
-    - uses: actions/checkout@v4
-    - name: install python
-      run: sudo apt install python3 python3-pip python3-venv
-    - name: install deps
-      uses: python3 ./scripts/dev.py utils install-system-packages
-    - name: cmake configure
-      run: cmake . -B build -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON
-    - name: cmake build
-      run: cmake --build build -j4
-    - name: run tests
-      run: cd build/ && ctest -j4 --output-on-failure
-  linux-python-build-2204:
-    runs-on: ubuntu-22.04
-    steps:
-    - uses: actions/checkout@v1
-    - name: install python
-      run: sudo apt install python3 python3-pip python3-venv
-    - name: install deps
-      run: python3 ./scripts/dev.py utils install-system-package
-    - name: install python-deps
-      run: pip3 install pytest pytest-xdist
-    - name: build python
-      run: cd python && sudo python3 -m pip install -e .[test]
-    - name: run tests
-      run: cd python/tests && pytest -n4
-  linux-python-build-2404:
-    runs-on: ubuntu-24.04
-    steps:
-    - uses: actions/checkout@v1
-    - name: install python
-      run: sudo apt install python3 python3-pip python3-venv
-    - name: install deps
-      run: python3 ./scripts/dev.py utils install-system-packages
+    - uses: actions/checkout@v7
     - name: setup venv
-      run: python3 -m venv venv
-    - name: Activate virtual environment
       run: |
-        echo PATH=${GITHUB_WORKSPACE}/venv/bin:$PATH >> $GITHUB_ENV
-        echo VIRTUAL_ENV=${GITHUB_WORKSPACE}/venv >> $GITHUB_ENV
-        ls ${GITHUB_WORKSPACE}/venv
-    - name: install python-deps
-      run: |
-        which pip3
-        pip3 install pytest pytest-xdist
-    - name: build python
-      run: cd python && python3 -m pip install -e .[test]
+        sudo apt-get update
+        sudo apt-get install -y python3 python3-pip python3-venv
+        python3 -m venv venv
+        echo "${GITHUB_WORKSPACE}/venv/bin" >> "$GITHUB_PATH"
+        echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/venv" >> "$GITHUB_ENV"
+    - name: install dev.py deps
+      run: pip install -r scripts/requirements.txt
+    - name: remove conflicting libunwind (ubuntu-22.04 runner images)
+      if: startsWith(matrix.os, 'ubuntu-22.04')
+      run: if dpkg -s libunwind-14-dev >/dev/null 2>&1; then sudo apt-get remove -y libunwind-14-dev; fi
+    - name: install system deps
+      run: sudo -E "$VIRTUAL_ENV/bin/python" ./scripts/dev.py utils install-system-packages
+    - name: cmake configure
+      run: cmake . -B build -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON
+    - name: cmake build
+      run: cmake --build build -j4
     - name: run tests
-      run: cd python/tests && python3 -m pytest -n4
+      run: cd build/ && ctest -j4 --output-on-failure
+
+  linux-python-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04, ubuntu-22.04-arm, ubuntu-24.04-arm, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+    - name: setup venv
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3 python3-pip python3-venv
+        python3 -m venv venv
+        echo "${GITHUB_WORKSPACE}/venv/bin" >> "$GITHUB_PATH"
+        echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/venv" >> "$GITHUB_ENV"
+    - name: install dev.py deps
+      run: pip install -r scripts/requirements.txt
+    - name: remove conflicting libunwind (ubuntu-22.04 runner images)
+      if: startsWith(matrix.os, 'ubuntu-22.04')
+      run: if dpkg -s libunwind-14-dev >/dev/null 2>&1; then sudo apt-get remove -y libunwind-14-dev; fi
+    - name: install system deps
+      run: sudo -E "$VIRTUAL_ENV/bin/python" ./scripts/dev.py utils install-system-packages
+    - name: build python
+      run: cd python && pip install pytest pytest-xdist && pip install -e .[test]
+      env:
+        OUSTER_SDK_CMAKE_ARGS:
+    - name: run tests
+      run: cd python/tests && python -m pytest -n4
+
   windows-build:
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v7
     - name: vcpkg build
-      uses: johnwason/vcpkg-action@v6
+      uses: johnwason/vcpkg-action@v8
       id: vcpkg
       with:
         manifest-dir: ${{ github.workspace }}
         triplet: x64-windows
         token: ${{ github.token }}
-        github-binarycache: true
         fetch-depth: 0
     - name: cmake configure
-      run: cmake . -B build -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON -DCMAKE_TOOLCHAIN_FILE=D:/a/ouster-sdk/ouster-sdk/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release
+      run: cmake . -B build -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON ${{ steps.vcpkg.outputs.vcpkg-cmake-config }}
     - name: cmake build
-      run: cmake --build build -j4
+      run: cmake --build build --config Release -j4
     - name: run tests
-      run: cd build/ && ctest -j4 -C Debug --output-on-failure
+      run: cd build/ && ctest -j4 -C Release --output-on-failure
+
   windows-python-build:
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v1
-    - uses: seanmiddleditch/gha-setup-ninja@master
+    - uses: actions/checkout@v7
+    - uses: seanmiddleditch/gha-setup-ninja@v6
     - uses: ilammy/msvc-dev-cmd@v1
     - name: vcpkg build
-      uses: johnwason/vcpkg-action@v6
+      uses: johnwason/vcpkg-action@v8
       id: vcpkg
       with:
         manifest-dir: ${{ github.workspace }}
         triplet: x64-windows
         token: ${{ github.token }}
-        github-binarycache: true
         fetch-depth: 0
     - name: install python-deps
-      run: pip3 install pytest pytest-xdist
+      run: pip install pytest pytest-xdist
     - name: build python
-      run: cd python && python3 -m pip install -e .[test]
+      # setup.py shlex-splits OUSTER_SDK_CMAKE_ARGS, which strips backslashes, so use a forward-slash path
+      shell: bash
       env:
-        OUSTER_SDK_CMAKE_ARGS: '-DCMAKE_TOOLCHAIN_FILE=D:/a/ouster-sdk/ouster-sdk/vcpkg/scripts/buildsystems/vcpkg.cmake'
+        VCPKG_CMAKE_CONFIG: ${{ steps.vcpkg.outputs.vcpkg-cmake-config }}
+      run: |
+        export OUSTER_SDK_CMAKE_ARGS="${VCPKG_CMAKE_CONFIG//\\//}"
+        echo "OUSTER_SDK_CMAKE_ARGS=$OUSTER_SDK_CMAKE_ARGS"
+        cd python && python -m pip install -e .[test]
     - name: run tests
-      run: cd python/tests && pytest -n3
+      run: cd python/tests && python -m pytest -n3
+
   mac-build:
     runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v1
-    - name: install deps
-      run: python3 ./scripts/dev.py utils install-system-packages
+    - uses: actions/checkout@v7
+    - name: setup venv
+      run: |
+        python3 -m venv venv
+        echo "${GITHUB_WORKSPACE}/venv/bin" >> "$GITHUB_PATH"
+        echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/venv" >> "$GITHUB_ENV"
+    - name: install dev.py deps
+      run: pip install -r scripts/requirements.txt
+    - name: install system deps
+      run: python ./scripts/dev.py utils install-system-packages
     - name: cmake configure
       run: cmake . -B build -DBUILD_TESTING=ON -DBUILD_EXAMPLES=ON
     - name: cmake build
       run: cmake --build build -j3
     - name: run tests
       run: cd build/ && ctest -j3 --output-on-failure
+
   mac-python-build:
     runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v1
-    - name: install python-deps
-      run: python3.12 -m pip install pytest pytest-xdist --break-system-packages
+    - uses: actions/checkout@v7
+    - name: setup venv
+      run: |
+        python3 -m venv venv
+        echo "${GITHUB_WORKSPACE}/venv/bin" >> "$GITHUB_PATH"
+        echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/venv" >> "$GITHUB_ENV"
+    - name: install dev.py deps
+      run: pip install -r scripts/requirements.txt
+    - name: install system deps
+      run: python ./scripts/dev.py utils install-system-packages
     - name: build python
-      run: cd python && python3.12 -m pip install -e .[test] --break-system-packages
-    - name: install deps
-      run: python3 ./scripts/dev.py utils install-system-packages
+      run: cd python && pip install pytest pytest-xdist && pip install -e .[test]
     - name: set netparams
       run: sudo sysctl -w net.inet.udp.maxdgram=65535
     - name: run tests
-      run: cd python/tests && python3.12 -m pytest -n3
+      run: cd python/tests && python -m pytest -n3
