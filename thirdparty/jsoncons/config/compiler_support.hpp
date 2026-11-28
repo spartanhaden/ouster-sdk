@@ -154,7 +154,13 @@
 #     endif // __has_include(<string_view>)
 #endif
 
-#if !defined(JSONCONS_HAS_STD_STRING_VIEW)
+// Ouster patch: don't pick std::string_view based on the language standard.
+// The SDK's libraries are built as C++14 while consumers (and targets that link
+// C++17-only dependencies) may be C++17; auto-detection then gives inline jsoncons
+// code different string_view layouts in different translation units (an ODR
+// violation that crashes at runtime). Define JSONCONS_HAS_STD_STRING_VIEW explicitly
+// to opt in, consistently, for every translation unit.
+#if !defined(JSONCONS_HAS_STD_STRING_VIEW) && defined(OUSTER_JSONCONS_AUTODETECT_STD_STRING_VIEW)
 #  if (defined JSONCONS_HAS_2017)
 #    if defined(__clang__)
 #      if __has_include(<string_view>)

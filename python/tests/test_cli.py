@@ -585,7 +585,7 @@ def test_source_split_save(test_pcap_file2, runner, tmp_path, args, monkeypatch)
         files = os.listdir(tmp_path)
 
         file_number_split = sys.platform.startswith("win")
-        file_number_split |= (sys.version_info[0] == 3 and sys.version_info[1] == 14)
+        file_number_split |= (sys.version_info >= (3, 14))
         if file_number_split:
             assert len(files) == num_files_weird
         else:
@@ -609,7 +609,7 @@ def test_source_split_save_raw(test_pcap_file2, runner, tmp_path, args, monkeypa
         # test we got the expected number of files
         files = os.listdir(tmp_path)
         file_number_split = sys.platform.startswith("win")
-        file_number_split |= (sys.version_info[0] == 3 and sys.version_info[1] == 14)
+        file_number_split |= (sys.version_info >= (3, 14))
         if file_number_split:
             assert len(files) == num_files_weird
         else:

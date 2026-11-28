@@ -63,6 +63,13 @@ target_link_libraries(ouster_core
     $<BUILD_INTERFACE:tsl::robin_map>
     )
 target_compile_definitions(ouster_core PRIVATE EIGEN_MPL2_ONLY)
+# With AVX enabled (e.g. GCC defaulting to -march=x86-64-v3), fixed-size Eigen types
+# such as Vector4d need 32-byte alignment. Before C++17, operator new and std::allocator
+# only guarantee 16 bytes unless -faligned-new is set. PUBLIC so consumers instantiating
+# SDK templates get the same behavior.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(ouster_core PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-faligned-new>)
+endif()
 if(BUILD_SHARED_LIBRARY)
   target_compile_definitions(ouster_core PRIVATE BUILD_SHARED_LIBS_EXPORT)
   target_compile_definitions(ouster_build PRIVATE BUILD_SHARED_LIBS_EXPORT)
